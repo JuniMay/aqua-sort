@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Aqua Sort</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-b" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-c" aria-hidden="true"></div>
+
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="title-wrap">
+          <p class="eyebrow">Water Sort Puzzle</p>
+          <div class="title-row">
+            <h1>Aqua Sort</h1>
+            <button id="theme-toggle" type="button" class="theme-toggle" aria-label="Theme mode is Auto">
+              Theme: Auto
+            </button>
+          </div>
+        </div>
+
+        <div class="controls">
+          <label class="difficulty-control control-card" for="bottle-count">
+            Bottles
+            <div class="range-wrap">
+              <input
+                id="bottle-count"
+                type="range"
+                min="8"
+                max="20"
+                value="16"
+                step="1"
+                aria-label="Bottle count"
+              />
+              <span id="bottle-count-value">16</span>
+            </div>
+          </label>
+          <label class="difficulty-control control-card" for="scramble">
+            Scramble
+            <div class="range-wrap">
+              <input
+                id="scramble"
+                type="range"
+                min="24"
+                max="220"
+                value="110"
+                step="1"
+                aria-label="Scramble intensity"
+              />
+              <span id="scramble-value">110</span>
+            </div>
+          </label>
+          <label class="difficulty-control control-card" for="empty-tubes">
+            Empty Tubes
+            <select id="empty-tubes" aria-label="Empty tube count">
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
+          <button id="new-game" type="button" class="action-btn">New Puzzle</button>
+          <button id="restart" type="button" class="secondary action-btn">Restart</button>
+          <button id="undo" type="button" class="secondary action-btn">Undo</button>
+          <button id="show-guide" type="button" class="secondary action-btn">Guide</button>
+        </div>
+      </header>
+
+      <section class="status-panel" aria-live="polite">
+        <div class="status-text-wrap">
+          <p id="status-text">Pick a tube to begin.</p>
+          <p id="score-line" class="score-line"></p>
+        </div>
+        <div class="stats">
+          <p><span id="moves">0</span> moves</p>
+          <p><span id="progress">0 / 0</span> completed</p>
+        </div>
+      </section>
+
+      <section id="board" class="board" aria-label="Puzzle board"></section>
+
+      <footer class="help">
+        <p>Tap one tube, then tap another. Pour only onto matching color or empty tubes.</p>
+      </footer>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div id="guide-overlay" class="guide-overlay" aria-hidden="true">
+      <div class="guide-card" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+        <p class="guide-eyebrow">Introduction</p>
+        <h2 id="guide-title">How Aqua Sort Works</h2>
+        <ol class="guide-steps">
+          <li>Select a tube that has color on top.</li>
+          <li>Select another tube to pour into it.</li>
+          <li>You can only pour into an empty tube or matching top color.</li>
+          <li>Win when every non-empty tube has one color only.</li>
+        </ol>
+        <p class="guide-note">
+          Tip: keep at least one empty tube open so you can reorder colors more freely.
+        </p>
+        <div class="guide-actions">
+          <label class="guide-checkbox" for="guide-hide-next">
+            <input id="guide-hide-next" type="checkbox" />
+            Don’t show this intro automatically.
+          </label>
+          <button id="guide-close" type="button">Start Playing</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

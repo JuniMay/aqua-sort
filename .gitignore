@@ -1,0 +1,24 @@
+# macOS / OS artifacts
+.DS_Store
+
+# Editor / IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Rust build output
+target/
+**/target/
+
+# Local packaging / build artifacts
+site/
+
+# JavaScript / frontend artifacts
+node_modules/
+coverage/
+*.log
+
+# Environment files
+.env
+.env.*

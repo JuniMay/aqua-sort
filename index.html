@@ -11,6 +11,10 @@
       href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -24,9 +28,6 @@
           <p class="eyebrow">Water Sort Puzzle</p>
           <div class="title-row">
             <h1>Aqua Sort</h1>
-            <button id="theme-toggle" type="button" class="theme-toggle" aria-label="Theme mode is Auto">
-              Theme: Auto
-            </button>
           </div>
         </div>
 
@@ -69,10 +70,46 @@
               <option value="4">4</option>
             </select>
           </label>
-          <button id="new-game" type="button" class="action-btn">New Puzzle</button>
-          <button id="restart" type="button" class="secondary action-btn">Restart</button>
-          <button id="undo" type="button" class="secondary action-btn">Undo</button>
-          <button id="show-guide" type="button" class="secondary action-btn">Guide</button>
+          <button
+            id="new-game"
+            type="button"
+            class="action-btn icon-btn has-tooltip"
+            aria-label="New Puzzle"
+            data-tooltip="New Puzzle"
+          >
+            <i class="fa-solid fa-shuffle" aria-hidden="true"></i>
+            <span class="sr-only">New Puzzle</span>
+          </button>
+          <button
+            id="restart"
+            type="button"
+            class="secondary action-btn icon-btn has-tooltip"
+            aria-label="Restart Puzzle"
+            data-tooltip="Restart Puzzle"
+          >
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+            <span class="sr-only">Restart Puzzle</span>
+          </button>
+          <button
+            id="undo"
+            type="button"
+            class="secondary action-btn icon-btn has-tooltip"
+            aria-label="Undo Move"
+            data-tooltip="Undo Move"
+          >
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+            <span class="sr-only">Undo Move</span>
+          </button>
+          <button
+            id="show-guide"
+            type="button"
+            class="secondary action-btn icon-btn has-tooltip"
+            aria-label="Introduction Guide"
+            data-tooltip="Introduction Guide"
+          >
+            <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+            <span class="sr-only">Introduction Guide</span>
+          </button>
         </div>
       </header>
 
@@ -82,14 +119,51 @@
           <p id="score-line" class="score-line"></p>
         </div>
         <div class="stats">
-          <p><span id="moves">0</span> moves</p>
-          <p><span id="progress">0 / 0</span> completed</p>
+          <p class="stat-pill"><span id="moves">0</span> moves</p>
+          <p class="stat-pill"><span id="progress">0 / 0</span> completed</p>
+          <p class="stat-pill"><span id="ideal-pill">Ideal: --</span></p>
         </div>
         <div class="status-actions">
-          <button id="share-initial" type="button" class="secondary mini-btn">Share Initial</button>
-          <button id="share-current" type="button" class="secondary mini-btn">Share Current</button>
-          <button id="toggle-shared-view" type="button" class="secondary mini-btn" hidden>
-            View Initial
+          <button
+            id="theme-toggle"
+            type="button"
+            class="theme-toggle secondary mini-btn icon-btn has-tooltip"
+            aria-label="Theme: Auto"
+            data-tooltip="Theme: Auto"
+          >
+            <i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>
+            <span class="sr-only">Theme: Auto</span>
+          </button>
+          <button
+            id="share-initial"
+            type="button"
+            class="secondary mini-btn icon-btn has-tooltip tooltip-end"
+            aria-label="Share Initial State"
+            data-tooltip="Share Initial State"
+          >
+            <i class="fa-solid fa-seedling" aria-hidden="true"></i>
+            <span class="sr-only">Share Initial State</span>
+          </button>
+          <button
+            id="share-current"
+            type="button"
+            class="secondary mini-btn icon-btn has-tooltip tooltip-end"
+            aria-label="Share Current State"
+            data-tooltip="Share Current State"
+          >
+            <i class="fa-solid fa-link" aria-hidden="true"></i>
+            <span class="sr-only">Share Current State</span>
+          </button>
+          <button
+            id="toggle-shared-view"
+            type="button"
+            class="secondary mini-btn icon-btn has-tooltip tooltip-end"
+            aria-label="View Initial State"
+            data-tooltip="View Initial State"
+            hidden
+          >
+            <i class="fa-solid fa-backward-step" aria-hidden="true"></i>
+            <span class="sr-only">View Initial State</span>
           </button>
         </div>
       </section>

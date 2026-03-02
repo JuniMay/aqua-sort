@@ -47,6 +47,7 @@ const statusTextEl = document.getElementById("status-text");
 const scoreLineEl = document.getElementById("score-line");
 const movesEl = document.getElementById("moves");
 const progressEl = document.getElementById("progress");
+const idealPillEl = document.getElementById("ideal-pill");
 const toastEl = document.getElementById("toast");
 const guideOverlayEl = document.getElementById("guide-overlay");
 const guideCloseBtn = document.getElementById("guide-close");
@@ -222,22 +223,37 @@ function resolvedTheme(mode) {
   return mode === "auto" ? systemThemePreference() : mode;
 }
 
+function setIconButtonState(button, { iconClass, tooltip }) {
+  const icon = button.querySelector("i");
+  if (icon) {
+    icon.className = iconClass;
+  }
+  button.dataset.tooltip = tooltip;
+  button.setAttribute("aria-label", tooltip);
+  const sr = button.querySelector(".sr-only");
+  if (sr) {
+    sr.textContent = tooltip;
+  }
+}
+
 function applyThemeMode(mode, persist = true) {
   const normalizedMode = normalizeThemeMode(mode);
   const activeTheme = resolvedTheme(normalizedMode);
   rootEl.dataset.themeMode = normalizedMode;
   rootEl.dataset.theme = activeTheme;
-  themeToggleBtn.textContent =
-    normalizedMode === "auto" ? "Theme: Auto" : normalizedMode === "dark" ? "Theme: Dark" : "Theme: Light";
-  themeToggleBtn.setAttribute(
-    "aria-label",
+  const themeLabel = normalizedMode === "auto" ? "Theme: Auto" : normalizedMode === "dark" ? "Theme: Dark" : "Theme: Light";
+  const nextModeLabel =
+    normalizedMode === "auto" ? "Dark" : normalizedMode === "dark" ? "Light" : "Auto";
+  const themeIcon =
     normalizedMode === "auto"
-      ? "Theme mode is Auto. Click to switch to Dark."
+      ? "fa-solid fa-circle-half-stroke"
       : normalizedMode === "dark"
-        ? "Theme mode is Dark. Click to switch to Light."
-        : "Theme mode is Light. Click to switch to Auto.",
-  );
-  themeToggleBtn.title = "Cycle theme mode: Auto, Dark, Light";
+        ? "fa-solid fa-moon"
+        : "fa-solid fa-sun";
+  setIconButtonState(themeToggleBtn, {
+    iconClass: themeIcon,
+    tooltip: `${themeLabel} | Next: ${nextModeLabel}`,
+  });
   if (persist) {
     writeStoredThemeMode(normalizedMode);
   }
@@ -565,9 +581,15 @@ function updateSharedViewButton() {
   }
   toggleSharedViewBtn.hidden = false;
   if (game.sharedView === "current") {
-    toggleSharedViewBtn.textContent = "View Initial";
+    setIconButtonState(toggleSharedViewBtn, {
+      iconClass: "fa-solid fa-backward-step",
+      tooltip: "View Initial State",
+    });
   } else {
-    toggleSharedViewBtn.textContent = "View Shared Current";
+    setIconButtonState(toggleSharedViewBtn, {
+      iconClass: "fa-solid fa-forward-step",
+      tooltip: "View Shared Current State",
+    });
   }
 }
 
@@ -691,6 +713,7 @@ function updateStatusText() {
     setScoreLine();
     progressEl.textContent = "0 / 0";
     movesEl.textContent = "0";
+    idealPillEl.textContent = "Ideal: --";
     return;
   }
 
@@ -703,25 +726,26 @@ function updateStatusText() {
     const actual = moveCount(game.handle);
     if (!game.finish || game.finish.pending) {
       statusTextEl.textContent = `Solved in ${actual} moves. Computing ideal moves...`;
-      setScoreLine("Analyzing optimal path...");
+      idealPillEl.textContent = "Ideal: ...";
+      setScoreLine();
       return;
     }
     const idealLabel = game.finish.exact ? "Ideal" : "Best known";
     statusTextEl.textContent = `Solved in ${actual} moves.`;
-    setScoreLine(
-      `${idealLabel}: ${game.finish.ideal} | Efficiency: ${game.finish.percent}% (${game.finish.grade})`,
-    );
+    idealPillEl.textContent = `${idealLabel}: ${game.finish.ideal} moves`;
+    setScoreLine(`Efficiency: ${game.finish.percent}% (${game.finish.grade})`);
     return;
   }
 
   if (game.ideal.loading) {
-    setScoreLine("Ideal: analyzing...");
+    idealPillEl.textContent = "Ideal: ...";
   } else if (game.ideal.value !== null) {
     const label = game.ideal.exact ? "Ideal" : "Best known";
-    setScoreLine(`${label}: ${game.ideal.value} moves`);
+    idealPillEl.textContent = `${label}: ${game.ideal.value} moves`;
   } else {
-    setScoreLine();
+    idealPillEl.textContent = "Ideal: --";
   }
+  setScoreLine();
 
   const currentStallStatus = stallStatus(game.handle, FORCED_LOOP_SCAN_MOVE_LIMIT);
   if (currentStallStatus === STALL_STATUS.NO_LEGAL_MOVES) {

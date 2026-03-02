@@ -149,6 +149,103 @@ h1 {
   white-space: nowrap;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
+.icon-btn > i {
+  font-size: 1.1rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.action-btn.icon-btn > i {
+  font-size: clamp(1.28rem, 1.8vw, 1.6rem);
+}
+
+.mini-btn.icon-btn {
+  min-width: 44px;
+  padding-inline: 11px;
+}
+
+.theme-toggle.icon-btn {
+  min-width: 42px;
+  padding-inline: 12px;
+}
+
+.has-tooltip::before,
+.has-tooltip::after {
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.has-tooltip::before {
+  content: none;
+}
+
+.has-tooltip::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 8px);
+  transform: translate(-50%, 4px);
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(131, 188, 217, 0.45);
+  background: rgba(12, 38, 54, 0.92);
+  color: #edf9ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  max-width: min(260px, calc(100vw - 24px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 30;
+}
+
+.has-tooltip:hover::before,
+.has-tooltip:hover::after,
+.has-tooltip:focus-visible::before,
+.has-tooltip:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.has-tooltip.tooltip-end::before,
+.has-tooltip.tooltip-end::after {
+  left: auto;
+  transform: translate(0, 4px);
+}
+
+.has-tooltip.tooltip-end::after {
+  right: 0;
+}
+
+.has-tooltip.tooltip-end:hover::before,
+.has-tooltip.tooltip-end:hover::after,
+.has-tooltip.tooltip-end:focus-visible::before,
+.has-tooltip.tooltip-end:focus-visible::after {
+  transform: translate(0, 0);
+}
+
 .controls {
   display: grid;
   grid-template-columns: repeat(18, minmax(0, 1fr));
@@ -239,6 +336,10 @@ button.secondary:not(.tube) {
   font-size: clamp(1.04rem, 1.1vw, 1.22rem);
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+.action-btn.icon-btn {
+  font-size: 1rem;
 }
 
 #new-game.action-btn {
@@ -335,11 +436,10 @@ input[type="range"]::-moz-range-thumb {
     radial-gradient(500px 120px at 85% 115%, rgba(255, 220, 177, 0.5), rgba(255, 255, 255, 0)),
     rgba(250, 253, 255, 0.92);
   padding: 10px 14px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 10px 12px;
 }
 
 .status-text-wrap {
@@ -370,21 +470,32 @@ input[type="range"]::-moz-range-thumb {
 
 .stats {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 14px;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .stats p {
   margin: 0;
 }
 
+.stat-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(24, 109, 143, 0.2);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.76), rgba(231, 245, 252, 0.65));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
 .status-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  justify-self: end;
 }
 
 .mini-btn {
@@ -674,6 +785,12 @@ input[type="range"]::-moz-range-thumb {
   border-color: rgba(105, 202, 230, 0.62);
 }
 
+:root[data-theme="dark"] .has-tooltip::after {
+  border-color: rgba(158, 214, 242, 0.45);
+  background: rgba(7, 23, 35, 0.95);
+  color: #d8efff;
+}
+
 :root[data-theme="dark"] .control-card {
   border-color: rgba(179, 223, 245, 0.18);
   background:
@@ -722,6 +839,12 @@ input[type="range"]::-moz-range-thumb {
   background:
     radial-gradient(500px 120px at 85% 115%, rgba(236, 165, 120, 0.2), rgba(255, 255, 255, 0)),
     rgba(12, 33, 46, 0.7);
+}
+
+:root[data-theme="dark"] .stat-pill {
+  border-color: rgba(114, 186, 219, 0.38);
+  background: linear-gradient(160deg, rgba(33, 67, 87, 0.82), rgba(19, 44, 59, 0.78));
+  box-shadow: inset 0 1px 0 rgba(204, 236, 255, 0.18);
 }
 
 :root[data-theme="dark"] .tube.candidate .glass {
@@ -860,12 +983,18 @@ input[type="range"]::-moz-range-thumb {
     padding-inline: 12px;
   }
 
+  .has-tooltip::before,
+  .has-tooltip::after {
+    display: none;
+  }
+
   .app-shell {
     border-radius: 20px;
     padding: 14px;
   }
 
   .status-panel {
+    grid-template-columns: 1fr;
     align-items: flex-start;
   }
 

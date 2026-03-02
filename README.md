@@ -87,6 +87,10 @@ This app is a static website:
 - `Undo` reverts one move.
 - `Restart` resets the current puzzle.
 - Keyboard shortcuts: `U` undo, `R` restart, `N` new puzzle.
+- Share links:
+  - `Share Initial`: exports initial puzzle state.
+  - `Share Current`: exports current progress state.
+  - Both are encoded as GET params (for example `?ws=1&t=i...` or `?ws=1&t=c...`) and auto-restore when opened.
 
 # About
 

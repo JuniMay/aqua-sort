@@ -380,6 +380,22 @@ input[type="range"]::-moz-range-thumb {
   margin: 0;
 }
 
+.status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mini-btn {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .board {
   display: flex;
   flex-wrap: wrap;
@@ -851,6 +867,11 @@ input[type="range"]::-moz-range-thumb {
 
   .status-panel {
     align-items: flex-start;
+  }
+
+  .status-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .controls {

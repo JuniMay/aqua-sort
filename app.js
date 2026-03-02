@@ -36,6 +36,9 @@ const newGameBtn = document.getElementById("new-game");
 const restartBtn = document.getElementById("restart");
 const undoBtn = document.getElementById("undo");
 const showGuideBtn = document.getElementById("show-guide");
+const shareInitialBtn = document.getElementById("share-initial");
+const shareCurrentBtn = document.getElementById("share-current");
+const toggleSharedViewBtn = document.getElementById("toggle-shared-view");
 const statusTextEl = document.getElementById("status-text");
 const scoreLineEl = document.getElementById("score-line");
 const movesEl = document.getElementById("moves");
@@ -49,18 +52,79 @@ const themeToggleBtn = document.getElementById("theme-toggle");
 const GUIDE_STORAGE_KEY = "aqua_sort_intro_hidden_v1";
 const THEME_STORAGE_KEY = "aqua_sort_theme_v1";
 const THEME_MODE_CYCLE = ["auto", "dark", "light"];
+const SHARE_VERSION = "1";
+const MOVE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const TUBE_CAPACITY = 4;
+const BOTTLE_MIN = 8;
+const BOTTLE_MAX = 20;
+const BOTTLE_DEFAULT = 16;
+const EMPTY_MIN = 2;
+const EMPTY_MAX = 4;
+const EMPTY_DEFAULT = 2;
+const SCRAMBLE_DEFAULT = 110;
+const SCRAMBLE_MIN = 24;
+const SCRAMBLE_MAX = 220;
+const IDEAL_COMPUTE_DELAY_MS = 20;
+const TOAST_DURATION_MS = 1600;
+const SHAKE_DURATION_MS = 300;
+const SHAKE_CLEAR_DELAY_MS = 320;
+const LAST_MOVE_HIGHLIGHT_MS = 360;
+const GUIDE_AUTO_OPEN_DELAY_MS = 120;
+const SEGMENT_HEIGHT_PERCENT = 25;
+const BOARD_DENSITY_COMPACT_THRESHOLD = 14;
+const BOARD_DENSITY_TIGHT_THRESHOLD = 18;
+const FORCED_LOOP_SCAN_MOVE_LIMIT = 20;
+const DISTINCT_BASE_COLORS = [
+  [205, 64, 55],
+  [30, 58, 56],
+  [282, 47, 58],
+  [165, 55, 46],
+  [48, 66, 52],
+  [336, 50, 57],
+  [232, 56, 60],
+  [12, 52, 54],
+  [142, 42, 49],
+  [258, 46, 52],
+  [191, 54, 52],
+  [76, 50, 50],
+  [304, 40, 58],
+  [219, 46, 48],
+  [24, 46, 50],
+  [156, 38, 56],
+  [348, 44, 55],
+  [90, 38, 47],
+  [272, 42, 46],
+  [201, 40, 61],
+  [60, 46, 56],
+  [324, 38, 50],
+  [128, 35, 52],
+  [16, 40, 48],
+];
 
 function parseInteger(value, fallback) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function defaultIdealState() {
+  return {
+    loading: false,
+    value: null,
+    exact: false,
+  };
+}
+
 // Runtime state shared across UI handlers and render passes.
 const game = {
   handle: null,
-  bottleCount: parseInteger(bottleCountEl.value, 16),
-  scramble: parseInteger(scrambleEl.value, 110),
-  emptyTubes: parseInteger(emptyTubesEl.value, 2),
+  bottleCount: parseInteger(bottleCountEl.value, BOTTLE_DEFAULT),
+  scramble: parseInteger(scrambleEl.value, SCRAMBLE_DEFAULT),
+  emptyTubes: parseInteger(emptyTubesEl.value, EMPTY_DEFAULT),
+  activeBottleCount: parseInteger(bottleCountEl.value, BOTTLE_DEFAULT),
+  activeScramble: parseInteger(scrambleEl.value, SCRAMBLE_DEFAULT),
+  activeEmptyTubes: parseInteger(emptyTubesEl.value, EMPTY_DEFAULT),
+  seed: null,
+  moveTrail: [],
   selectedTube: null,
   won: false,
   lastMove: null,
@@ -68,14 +132,24 @@ const game = {
   clearLastMoveTimer: null,
   toastTimer: null,
   ready: false,
-  ideal: {
-    loading: false,
-    value: null,
-    exact: false,
-  },
+  ideal: defaultIdealState(),
   finish: null,
   scoreToken: 0,
+  sharedReplay: null,
+  sharedView: "current",
+  stallCheck: {
+    key: "",
+    forcedLoop: false,
+  },
 };
+
+function resetInteractionState() {
+  game.selectedTube = null;
+  game.won = false;
+  game.lastMove = null;
+  game.finish = null;
+  game.stallCheck = { key: "", forcedLoop: false };
+}
 
 // --- Guide modal persistence ---
 
@@ -207,27 +281,24 @@ function colorForIndex(index) {
     return COLOR_CACHE.get(cacheKey);
   }
 
-  // Golden-angle hue spacing keeps neighboring IDs visually far apart.
-  let hue = Math.round((index * 137.508) % 360);
-  let saturation = [74, 68, 62][index % 3];
-  let lightness = [56, 52, 60][(index + 1) % 3];
+  // Prefer a curated palette so neighboring colors remain highly distinguishable.
+  let [hue, saturation, lightness] =
+    DISTINCT_BASE_COLORS[index % DISTINCT_BASE_COLORS.length];
 
-  // Tone down aggressive red/green buckets to avoid eye-straining neon colors.
-  const nearRed = hue >= 345 || hue <= 20;
-  const nearGreen = hue >= 85 && hue <= 155;
-  if (nearRed) {
-    hue = (hue + 12) % 360;
-    saturation = Math.min(saturation, 56);
-    lightness = Math.max(lightness, 58);
-  } else if (nearGreen) {
-    hue = (hue + 14) % 360;
-    saturation = Math.min(saturation, 58);
-    lightness = Math.max(lightness, 56);
+  // For out-of-range IDs (custom engine configs), derive extra colors with a
+  // hue jump and slight S/L drift to keep them separated from base entries.
+  if (index >= DISTINCT_BASE_COLORS.length) {
+    const cycle = Math.floor(index / DISTINCT_BASE_COLORS.length);
+    hue = Math.round((hue + cycle * 23) % 360);
+    saturation = Math.max(34, Math.min(68, saturation + (cycle % 2 === 0 ? -6 : 4)));
+    lightness = Math.max(44, Math.min(64, lightness + (cycle % 3) * 3 - 3));
   }
 
   if (activeTheme === "dark") {
-    saturation = Math.max(38, saturation - 16);
-    lightness = Math.max(40, Math.min(52, lightness - 10));
+    // Dark mode keeps contrast while dimming overall intensity.
+    const darkLift = [-2, 2, 5, 0][index % 4];
+    saturation = Math.max(34, Math.min(66, saturation - 12));
+    lightness = Math.max(34, Math.min(58, lightness - 12 + darkLift));
   }
 
   const color = `hsl(${hue} ${saturation}% ${lightness}%)`;
@@ -240,9 +311,9 @@ function colorForIndex(index) {
 function normalizedScrambleValue(value) {
   const number = Number.parseInt(String(value), 10);
   if (Number.isNaN(number)) {
-    return 110;
+    return SCRAMBLE_DEFAULT;
   }
-  return Math.max(24, Math.min(220, number));
+  return Math.max(SCRAMBLE_MIN, Math.min(SCRAMBLE_MAX, number));
 }
 
 function efficiencyGrade(percent) {
@@ -259,6 +330,11 @@ function efficiencyGrade(percent) {
     return "C";
   }
   return "D";
+}
+
+function solvedToastSummary(finish) {
+  const label = finish.exact ? "ideal" : "best known";
+  return `Solved: ${finish.actual} moves (${label} ${finish.ideal}, ${finish.percent}% efficiency).`;
 }
 
 function refreshFinishScore() {
@@ -293,9 +369,8 @@ function computeIdealMovesForPuzzle() {
   const token = game.scoreToken + 1;
   game.scoreToken = token;
   game.ideal = {
+    ...defaultIdealState(),
     loading: true,
-    value: null,
-    exact: false,
   };
   render();
 
@@ -315,14 +390,11 @@ function computeIdealMovesForPuzzle() {
       const wasPending = game.finish && game.finish.pending;
       refreshFinishScore();
       if (wasPending && game.finish && !game.finish.pending) {
-        const label = game.finish.exact ? "ideal" : "best known";
-        showToast(
-          `Solved: ${game.finish.actual} moves (${label} ${game.finish.ideal}, ${game.finish.percent}% efficiency).`,
-        );
+        showToast(solvedToastSummary(game.finish));
       }
     }
     render();
-  }, 20);
+  }, IDEAL_COMPUTE_DELAY_MS);
 }
 
 // --- Board projection and move validation helpers ---
@@ -351,6 +423,317 @@ function topColor(tube) {
   return tube.length > 0 ? tube[tube.length - 1] : null;
 }
 
+function boardStateKey(board) {
+  return board.map((tube) => tube.join(",")).join("|");
+}
+
+function clampBottleCount(value) {
+  return Math.max(BOTTLE_MIN, Math.min(BOTTLE_MAX, value));
+}
+
+function clampEmptyTubes(value, bottleCount) {
+  return Math.max(EMPTY_MIN, Math.min(EMPTY_MAX, Math.min(value, bottleCount - 2)));
+}
+
+function encodeMoveTrail(moves) {
+  let out = "";
+  for (const move of moves) {
+    const from = move.from >>> 0;
+    const to = move.to >>> 0;
+    const packed = ((from & 31) << 5) | (to & 31);
+    out += MOVE_ALPHABET[(packed >> 6) & 63];
+    out += MOVE_ALPHABET[packed & 63];
+  }
+  return out;
+}
+
+function decodeMoveTrail(encoded) {
+  if (!encoded || encoded.length === 0) {
+    return [];
+  }
+  if (encoded.length % 2 !== 0) {
+    return null;
+  }
+  const moves = [];
+  for (let i = 0; i < encoded.length; i += 2) {
+    const hi = MOVE_ALPHABET.indexOf(encoded[i]);
+    const lo = MOVE_ALPHABET.indexOf(encoded[i + 1]);
+    if (hi < 0 || lo < 0) {
+      return null;
+    }
+    const packed = (hi << 6) | lo;
+    moves.push({
+      from: (packed >> 5) & 31,
+      to: packed & 31,
+    });
+  }
+  return moves;
+}
+
+function normalizeSharePayload(raw) {
+  if (!raw) {
+    return null;
+  }
+  const type = raw.type === "current" ? "current" : "initial";
+  const bottleCount = clampBottleCount(parseInteger(raw.bottleCount, BOTTLE_DEFAULT));
+  const scramble = normalizedScrambleValue(raw.scramble);
+  const emptyTubes = clampEmptyTubes(parseInteger(raw.emptyTubes, EMPTY_DEFAULT), bottleCount);
+  const seed = parseInteger(raw.seed, 0);
+  if (!Number.isFinite(seed) || seed <= 0) {
+    return null;
+  }
+  return {
+    type,
+    bottleCount,
+    scramble,
+    emptyTubes,
+    seed,
+    moves: Array.isArray(raw.moves) ? raw.moves : [],
+  };
+}
+
+function parseShareFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("ws") !== SHARE_VERSION) {
+    return null;
+  }
+  const mode = params.get("t");
+  if (mode !== "i" && mode !== "c") {
+    return null;
+  }
+  const decodedMoves = mode === "c" ? decodeMoveTrail(params.get("mv") || "") : [];
+  if (mode === "c" && decodedMoves === null) {
+    return null;
+  }
+  const payload = normalizeSharePayload({
+      type: mode === "c" ? "current" : "initial",
+      bottleCount: parseInteger(params.get("b"), BOTTLE_DEFAULT),
+      emptyTubes: parseInteger(params.get("e"), EMPTY_DEFAULT),
+      scramble: parseInteger(params.get("sc"), SCRAMBLE_DEFAULT),
+      seed: Number.parseInt(params.get("sd") || "", 10),
+      moves: decodedMoves,
+    });
+  if (!payload) {
+    return null;
+  }
+  return payload;
+}
+
+function applyPuzzleSettings(settings) {
+  const bottleCount = clampBottleCount(parseInteger(settings.bottleCount, BOTTLE_DEFAULT));
+  game.bottleCount = bottleCount;
+  bottleCountEl.value = String(bottleCount);
+
+  game.scramble = normalizedScrambleValue(settings.scramble);
+  scrambleEl.value = String(game.scramble);
+
+  game.emptyTubes = clampEmptyTubes(parseInteger(settings.emptyTubes, EMPTY_DEFAULT), bottleCount);
+  emptyTubesEl.value = String(game.emptyTubes);
+
+  normalizeEmptyTubes();
+  updateBottleCountLabel();
+  updateScrambleLabel();
+}
+
+function buildShareUrl(type) {
+  if (game.handle === null || game.seed === null) {
+    return null;
+  }
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("ws", SHARE_VERSION);
+  url.searchParams.set("t", type === "current" ? "c" : "i");
+  url.searchParams.set("b", String(game.activeBottleCount));
+  url.searchParams.set("e", String(game.activeEmptyTubes));
+  url.searchParams.set("sc", String(game.activeScramble));
+  url.searchParams.set("sd", String(game.seed));
+  if (type === "current") {
+    url.searchParams.set("mv", encodeMoveTrail(game.moveTrail));
+  }
+  return url.toString();
+}
+
+async function copyShareLink(type) {
+  const url = buildShareUrl(type);
+  if (!url) {
+    showToast("No puzzle to share yet.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast(type === "current" ? "Current-state link copied." : "Initial-state link copied.");
+  } catch {
+    window.prompt("Copy share link:", url);
+  }
+}
+
+function updateSharedViewButton() {
+  if (!game.sharedReplay) {
+    toggleSharedViewBtn.hidden = true;
+    return;
+  }
+  toggleSharedViewBtn.hidden = false;
+  if (game.sharedView === "current") {
+    toggleSharedViewBtn.textContent = "View Initial";
+  } else {
+    toggleSharedViewBtn.textContent = "View Shared Current";
+  }
+}
+
+function restoreSharedCurrent(moves, options = {}) {
+  const warnOnPartial = options.warnOnPartial !== false;
+  const total = tubeCount(game.handle);
+  let applied = 0;
+  for (const move of moves) {
+    if (
+      !move ||
+      move.from < 0 ||
+      move.to < 0 ||
+      move.from >= total ||
+      move.to >= total ||
+      move.from === move.to
+    ) {
+      break;
+    }
+    if (!canPour(game.handle, move.from, move.to)) {
+      break;
+    }
+    const moved = pour(game.handle, move.from, move.to);
+    if (moved <= 0) {
+      break;
+    }
+    game.moveTrail.push({ from: move.from, to: move.to });
+    applied += 1;
+  }
+  if (warnOnPartial && applied !== moves.length) {
+    showToast("Share link restored partially: some moves are invalid.");
+  }
+  resetInteractionState();
+}
+
+function toggleSharedView() {
+  if (game.handle === null || !game.sharedReplay) {
+    return;
+  }
+
+  restart(game.handle);
+  resetInteractionState();
+  game.moveTrail = [];
+
+  if (game.sharedView === "current") {
+    game.sharedView = "initial";
+    updateSharedViewButton();
+    render();
+    showToast("Showing shared initial state.");
+    return;
+  }
+
+  restoreSharedCurrent(game.sharedReplay.moves, { warnOnPartial: false });
+  game.sharedView = "current";
+  updateSharedViewButton();
+  checkWin();
+  render();
+  showToast("Showing shared current state.");
+}
+
+function canPourBoard(board, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= board.length || to >= board.length) {
+    return false;
+  }
+  const source = board[from];
+  const destination = board[to];
+  if (!source || source.length === 0 || !destination || destination.length >= TUBE_CAPACITY) {
+    return false;
+  }
+  if (destination.length === 0) {
+    return true;
+  }
+  return source[source.length - 1] === destination[destination.length - 1];
+}
+
+function topRunLength(tube) {
+  if (!tube || tube.length === 0) {
+    return 0;
+  }
+  const top = tube[tube.length - 1];
+  let run = 0;
+  for (let i = tube.length - 1; i >= 0; i -= 1) {
+    if (tube[i] !== top) {
+      break;
+    }
+    run += 1;
+  }
+  return run;
+}
+
+function applyBoardMove(board, from, to) {
+  const next = board.map((tube) => tube.slice());
+  if (!canPourBoard(next, from, to)) {
+    return next;
+  }
+  const source = next[from];
+  const destination = next[to];
+  const amount = Math.min(topRunLength(source), TUBE_CAPACITY - destination.length);
+  if (amount <= 0) {
+    return next;
+  }
+  const moved = source.splice(source.length - amount, amount);
+  destination.push(...moved);
+  return next;
+}
+
+function legalMovesForBoard(board) {
+  const moves = [];
+  for (let from = 0; from < board.length; from += 1) {
+    for (let to = 0; to < board.length; to += 1) {
+      if (canPourBoard(board, from, to)) {
+        moves.push([from, to]);
+      }
+    }
+  }
+  return moves;
+}
+
+function isForcedMoveLoop(board, precomputedMoves = null) {
+  const key = boardStateKey(board);
+  if (game.stallCheck.key === key) {
+    return game.stallCheck.forcedLoop;
+  }
+
+  const moves = precomputedMoves || legalMovesForBoard(board);
+  if (moves.length === 0 || moves.length > FORCED_LOOP_SCAN_MOVE_LIMIT) {
+    game.stallCheck = { key, forcedLoop: false };
+    return false;
+  }
+
+  for (const [from, to] of moves) {
+    const next = applyBoardMove(board, from, to);
+    const nextMoves = legalMovesForBoard(next);
+    if (nextMoves.length === 0) {
+      game.stallCheck = { key, forcedLoop: false };
+      return false;
+    }
+
+    let hasEscape = false;
+    for (const [nextFrom, nextTo] of nextMoves) {
+      const after = applyBoardMove(next, nextFrom, nextTo);
+      if (boardStateKey(after) !== key) {
+        hasEscape = true;
+        break;
+      }
+    }
+
+    if (hasEscape) {
+      game.stallCheck = { key, forcedLoop: false };
+      return false;
+    }
+  }
+
+  game.stallCheck = { key, forcedLoop: true };
+  return true;
+}
+
 function invalidMoveReason(from, to, board) {
   if (from === to) {
     return "Pick a different tube.";
@@ -363,7 +746,7 @@ function invalidMoveReason(from, to, board) {
   if (!destination) {
     return "That tube is unavailable.";
   }
-  if (destination.length >= 4) {
+  if (destination.length >= TUBE_CAPACITY) {
     return "The destination tube is full.";
   }
   if (destination.length > 0 && topColor(destination) !== topColor(source)) {
@@ -382,7 +765,7 @@ function showToast(message) {
   toastEl.classList.add("show");
   game.toastTimer = window.setTimeout(() => {
     toastEl.classList.remove("show");
-  }, 1600);
+  }, TOAST_DURATION_MS);
 }
 
 function clearShake(index) {
@@ -393,9 +776,9 @@ function clearShake(index) {
 }
 
 function triggerShake(index) {
-  game.shakeUntil.set(index, Date.now() + 300);
+  game.shakeUntil.set(index, Date.now() + SHAKE_DURATION_MS);
   render();
-  window.setTimeout(() => clearShake(index), 320);
+  window.setTimeout(() => clearShake(index), SHAKE_CLEAR_DELAY_MS);
 }
 
 // --- Rendering ---
@@ -409,7 +792,7 @@ function updateScrambleLabel() {
 }
 
 function normalizeEmptyTubes() {
-  const maxAllowed = Math.min(4, Math.max(2, game.bottleCount - 2));
+  const maxAllowed = Math.min(EMPTY_MAX, Math.max(EMPTY_MIN, game.bottleCount - 2));
   if (game.emptyTubes > maxAllowed) {
     game.emptyTubes = maxAllowed;
     emptyTubesEl.value = String(maxAllowed);
@@ -419,11 +802,15 @@ function normalizeEmptyTubes() {
   }
 }
 
+function setScoreLine(text = "") {
+  scoreLineEl.textContent = text;
+  scoreLineEl.classList.toggle("visible", text.length > 0);
+}
+
 function updateStatusText(board) {
   if (game.handle === null) {
     statusTextEl.textContent = "Loading engine...";
-    scoreLineEl.textContent = "";
-    scoreLineEl.classList.remove("visible");
+    setScoreLine();
     progressEl.textContent = "0 / 0";
     movesEl.textContent = "0";
     return;
@@ -438,32 +825,37 @@ function updateStatusText(board) {
     const actual = moveCount(game.handle);
     if (!game.finish || game.finish.pending) {
       statusTextEl.textContent = `Solved in ${actual} moves. Computing ideal moves...`;
-      scoreLineEl.textContent = "Analyzing optimal path...";
-      scoreLineEl.classList.add("visible");
+      setScoreLine("Analyzing optimal path...");
       return;
     }
-    if (!game.finish.pending) {
-      const idealLabel = game.finish.exact ? "Ideal" : "Best known";
-      statusTextEl.textContent = `Solved in ${actual} moves.`;
-      scoreLineEl.textContent = `${idealLabel}: ${game.finish.ideal} | Efficiency: ${game.finish.percent}% (${game.finish.grade})`;
-      scoreLineEl.classList.add("visible");
-      return;
-    }
+    const idealLabel = game.finish.exact ? "Ideal" : "Best known";
     statusTextEl.textContent = `Solved in ${actual} moves.`;
-    scoreLineEl.textContent = "";
-    scoreLineEl.classList.remove("visible");
+    setScoreLine(
+      `${idealLabel}: ${game.finish.ideal} | Efficiency: ${game.finish.percent}% (${game.finish.grade})`,
+    );
     return;
   }
 
-  scoreLineEl.textContent = "";
-  scoreLineEl.classList.remove("visible");
   if (game.ideal.loading) {
-    scoreLineEl.textContent = "Ideal: analyzing...";
-    scoreLineEl.classList.add("visible");
+    setScoreLine("Ideal: analyzing...");
   } else if (game.ideal.value !== null) {
     const label = game.ideal.exact ? "Ideal" : "Best known";
-    scoreLineEl.textContent = `${label}: ${game.ideal.value} moves`;
-    scoreLineEl.classList.add("visible");
+    setScoreLine(`${label}: ${game.ideal.value} moves`);
+  } else {
+    setScoreLine();
+  }
+
+  const legalMoves = legalMovesForBoard(board);
+  if (legalMoves.length === 0) {
+    game.selectedTube = null;
+    statusTextEl.textContent = "No legal moves left in this state. Undo or Restart.";
+    return;
+  }
+
+  if (isForcedMoveLoop(board, legalMoves)) {
+    game.selectedTube = null;
+    statusTextEl.textContent = "This state is stuck in a move loop. Undo a few moves or Restart.";
+    return;
   }
 
   if (game.selectedTube === null) {
@@ -508,9 +900,9 @@ function tubeClasses(index) {
 }
 
 function renderBoard(board) {
-  if (board.length >= 18) {
+  if (board.length >= BOARD_DENSITY_TIGHT_THRESHOLD) {
     boardEl.dataset.density = "tight";
-  } else if (board.length >= 14) {
+  } else if (board.length >= BOARD_DENSITY_COMPACT_THRESHOLD) {
     boardEl.dataset.density = "compact";
   } else {
     boardEl.dataset.density = "normal";
@@ -538,7 +930,7 @@ function renderBoard(board) {
       }
       layer.className = classes.join(" ");
       layer.style.setProperty("--segment-color", colorForIndex(color));
-      layer.style.bottom = `${layerIndex * 25}%`;
+      layer.style.bottom = `${layerIndex * SEGMENT_HEIGHT_PERCENT}%`;
       if (showToken) {
         const token = document.createElement("span");
         token.className = "segment-token";
@@ -561,7 +953,7 @@ function finishLastMoveAnimation() {
   game.clearLastMoveTimer = window.setTimeout(() => {
     game.lastMove = null;
     render();
-  }, 360);
+  }, LAST_MOVE_HIGHLIGHT_MS);
 }
 
 function render() {
@@ -570,6 +962,10 @@ function render() {
   renderBoard(board);
   undoBtn.disabled = game.handle === null || moveCount(game.handle) === 0;
   restartBtn.disabled = game.handle === null;
+  shareInitialBtn.disabled = game.handle === null;
+  shareCurrentBtn.disabled = game.handle === null;
+  toggleSharedViewBtn.disabled = game.handle === null || !game.sharedReplay;
+  updateSharedViewButton();
 }
 
 function checkWin() {
@@ -587,10 +983,7 @@ function checkWin() {
     showToast("Puzzle solved. Computing ideal moves...");
     return;
   }
-  const label = game.finish.exact ? "ideal" : "best known";
-  showToast(
-    `Solved: ${game.finish.actual} moves (${label} ${game.finish.ideal}, ${game.finish.percent}% efficiency).`,
-  );
+  showToast(solvedToastSummary(game.finish));
 }
 
 // --- Input handlers ---
@@ -623,6 +1016,7 @@ function handleTubeClick(index) {
   if (canPour(game.handle, selected, index)) {
     const moved = pour(game.handle, selected, index);
     if (moved > 0) {
+      game.moveTrail.push({ from: selected, to: index });
       game.selectedTube = null;
       game.lastMove = { from: selected, to: index };
       render();
@@ -646,24 +1040,27 @@ function destroyCurrentGame() {
     game.handle = null;
   }
   game.scoreToken += 1;
-  game.ideal = {
-    loading: false,
-    value: null,
-    exact: false,
-  };
-  game.finish = null;
+  game.ideal = defaultIdealState();
+  resetInteractionState();
 }
 
-function startNewGame() {
+function startNewGame(seed = randomSeed(), options = {}) {
+  const sharedReplay = options.sharedReplay || null;
+  const sharedView = options.sharedView === "initial" ? "initial" : "current";
   if (!game.ready) {
     return;
   }
   destroyCurrentGame();
-  game.handle = createGame(game.bottleCount, game.emptyTubes, game.scramble, randomSeed());
-  game.selectedTube = null;
-  game.won = false;
-  game.lastMove = null;
-  game.finish = null;
+  game.seed = seed;
+  game.activeBottleCount = game.bottleCount;
+  game.activeEmptyTubes = game.emptyTubes;
+  game.activeScramble = game.scramble;
+  game.moveTrail = [];
+  game.handle = createGame(game.bottleCount, game.emptyTubes, game.scramble, seed);
+  resetInteractionState();
+  game.sharedReplay = sharedReplay;
+  game.sharedView = sharedReplay ? sharedView : "current";
+  updateSharedViewButton();
   render();
   computeIdealMovesForPuzzle();
 }
@@ -673,10 +1070,12 @@ function restartGame() {
     return;
   }
   restart(game.handle);
-  game.selectedTube = null;
-  game.won = false;
-  game.lastMove = null;
-  game.finish = null;
+  resetInteractionState();
+  game.moveTrail = [];
+  if (game.sharedReplay) {
+    game.sharedView = "initial";
+    updateSharedViewButton();
+  }
   render();
 }
 
@@ -687,10 +1086,10 @@ function undoMove() {
   if (!undo(game.handle)) {
     return;
   }
-  game.selectedTube = null;
-  game.won = false;
-  game.lastMove = null;
-  game.finish = null;
+  resetInteractionState();
+  if (game.moveTrail.length > 0) {
+    game.moveTrail.pop();
+  }
   render();
 }
 
@@ -761,19 +1160,55 @@ undoBtn.addEventListener("click", undoMove);
 showGuideBtn.addEventListener("click", openGuide);
 guideCloseBtn.addEventListener("click", closeGuide);
 themeToggleBtn.addEventListener("click", cycleThemeMode);
+shareInitialBtn.addEventListener("click", () => {
+  copyShareLink("initial");
+});
+shareCurrentBtn.addEventListener("click", () => {
+  copyShareLink("current");
+});
+toggleSharedViewBtn.addEventListener("click", toggleSharedView);
 
 async function bootstrap() {
+  const shared = parseShareFromUrl();
   initTheme();
-  updateBottleCountLabel();
-  updateScrambleLabel();
-  normalizeEmptyTubes();
-  statusTextEl.textContent = "Loading Rust + WebAssembly engine...";
+  if (shared) {
+    applyPuzzleSettings(shared);
+    statusTextEl.textContent = "Loading shared puzzle...";
+  } else {
+    updateBottleCountLabel();
+    updateScrambleLabel();
+    normalizeEmptyTubes();
+    statusTextEl.textContent = "Loading Rust + WebAssembly engine...";
+  }
   try {
     await initEngine();
     game.ready = true;
-    startNewGame();
+    if (shared) {
+      const replay =
+        shared.type === "current"
+          ? {
+              moves: shared.moves,
+            }
+          : null;
+      startNewGame(shared.seed, {
+        sharedReplay: replay,
+        sharedView: shared.type === "current" ? "current" : "initial",
+      });
+      if (shared.type === "current") {
+        restoreSharedCurrent(shared.moves);
+        checkWin();
+        render();
+      }
+      showToast(
+        shared.type === "current"
+          ? "Shared current state restored."
+          : "Shared initial puzzle restored.",
+      );
+    } else {
+      startNewGame();
+    }
     if (shouldAutoShowGuide()) {
-      window.setTimeout(() => openGuide(), 120);
+      window.setTimeout(() => openGuide(), GUIDE_AUTO_OPEN_DELAY_MS);
     }
   } catch (error) {
     console.error(error);

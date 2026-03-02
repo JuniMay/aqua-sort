@@ -13,6 +13,10 @@ import {
   tubeLen,
   tubeColor,
   canPour,
+  invalidMoveReasonCode,
+  stallStatus,
+  MOVE_REASON,
+  STALL_STATUS,
   pour,
   undo,
   restart,
@@ -54,7 +58,6 @@ const THEME_STORAGE_KEY = "aqua_sort_theme_v1";
 const THEME_MODE_CYCLE = ["auto", "dark", "light"];
 const SHARE_VERSION = "1";
 const MOVE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-const TUBE_CAPACITY = 4;
 const BOTTLE_MIN = 8;
 const BOTTLE_MAX = 20;
 const BOTTLE_DEFAULT = 16;
@@ -137,10 +140,6 @@ const game = {
   scoreToken: 0,
   sharedReplay: null,
   sharedView: "current",
-  stallCheck: {
-    key: "",
-    forcedLoop: false,
-  },
 };
 
 function resetInteractionState() {
@@ -148,7 +147,6 @@ function resetInteractionState() {
   game.won = false;
   game.lastMove = null;
   game.finish = null;
-  game.stallCheck = { key: "", forcedLoop: false };
 }
 
 // --- Guide modal persistence ---
@@ -419,14 +417,6 @@ function readBoardState() {
   return board;
 }
 
-function topColor(tube) {
-  return tube.length > 0 ? tube[tube.length - 1] : null;
-}
-
-function boardStateKey(board) {
-  return board.map((tube) => tube.join(",")).join("|");
-}
-
 function clampBottleCount(value) {
   return Math.max(BOTTLE_MIN, Math.min(BOTTLE_MAX, value));
 }
@@ -506,13 +496,13 @@ function parseShareFromUrl() {
     return null;
   }
   const payload = normalizeSharePayload({
-      type: mode === "c" ? "current" : "initial",
-      bottleCount: parseInteger(params.get("b"), BOTTLE_DEFAULT),
-      emptyTubes: parseInteger(params.get("e"), EMPTY_DEFAULT),
-      scramble: parseInteger(params.get("sc"), SCRAMBLE_DEFAULT),
-      seed: Number.parseInt(params.get("sd") || "", 10),
-      moves: decodedMoves,
-    });
+    type: mode === "c" ? "current" : "initial",
+    bottleCount: parseInteger(params.get("b"), BOTTLE_DEFAULT),
+    emptyTubes: parseInteger(params.get("e"), EMPTY_DEFAULT),
+    scramble: parseInteger(params.get("sc"), SCRAMBLE_DEFAULT),
+    seed: Number.parseInt(params.get("sd") || "", 10),
+    moves: decodedMoves,
+  });
   if (!payload) {
     return null;
   }
@@ -583,20 +573,9 @@ function updateSharedViewButton() {
 
 function restoreSharedCurrent(moves, options = {}) {
   const warnOnPartial = options.warnOnPartial !== false;
-  const total = tubeCount(game.handle);
   let applied = 0;
   for (const move of moves) {
-    if (
-      !move ||
-      move.from < 0 ||
-      move.to < 0 ||
-      move.from >= total ||
-      move.to >= total ||
-      move.from === move.to
-    ) {
-      break;
-    }
-    if (!canPour(game.handle, move.from, move.to)) {
+    if (!move) {
       break;
     }
     const moved = pour(game.handle, move.from, move.to);
@@ -637,122 +616,21 @@ function toggleSharedView() {
   showToast("Showing shared current state.");
 }
 
-function canPourBoard(board, from, to) {
-  if (from === to || from < 0 || to < 0 || from >= board.length || to >= board.length) {
-    return false;
+function invalidMoveReasonMessage(reasonCode) {
+  switch (reasonCode) {
+    case MOVE_REASON.SAME_TUBE:
+      return "Pick a different tube.";
+    case MOVE_REASON.SOURCE_EMPTY:
+      return "That tube is empty.";
+    case MOVE_REASON.DEST_UNAVAILABLE:
+      return "That tube is unavailable.";
+    case MOVE_REASON.DEST_FULL:
+      return "The destination tube is full.";
+    case MOVE_REASON.COLOR_MISMATCH:
+      return "You can only pour onto the same color or an empty tube.";
+    default:
+      return "That move is not allowed.";
   }
-  const source = board[from];
-  const destination = board[to];
-  if (!source || source.length === 0 || !destination || destination.length >= TUBE_CAPACITY) {
-    return false;
-  }
-  if (destination.length === 0) {
-    return true;
-  }
-  return source[source.length - 1] === destination[destination.length - 1];
-}
-
-function topRunLength(tube) {
-  if (!tube || tube.length === 0) {
-    return 0;
-  }
-  const top = tube[tube.length - 1];
-  let run = 0;
-  for (let i = tube.length - 1; i >= 0; i -= 1) {
-    if (tube[i] !== top) {
-      break;
-    }
-    run += 1;
-  }
-  return run;
-}
-
-function applyBoardMove(board, from, to) {
-  const next = board.map((tube) => tube.slice());
-  if (!canPourBoard(next, from, to)) {
-    return next;
-  }
-  const source = next[from];
-  const destination = next[to];
-  const amount = Math.min(topRunLength(source), TUBE_CAPACITY - destination.length);
-  if (amount <= 0) {
-    return next;
-  }
-  const moved = source.splice(source.length - amount, amount);
-  destination.push(...moved);
-  return next;
-}
-
-function legalMovesForBoard(board) {
-  const moves = [];
-  for (let from = 0; from < board.length; from += 1) {
-    for (let to = 0; to < board.length; to += 1) {
-      if (canPourBoard(board, from, to)) {
-        moves.push([from, to]);
-      }
-    }
-  }
-  return moves;
-}
-
-function isForcedMoveLoop(board, precomputedMoves = null) {
-  const key = boardStateKey(board);
-  if (game.stallCheck.key === key) {
-    return game.stallCheck.forcedLoop;
-  }
-
-  const moves = precomputedMoves || legalMovesForBoard(board);
-  if (moves.length === 0 || moves.length > FORCED_LOOP_SCAN_MOVE_LIMIT) {
-    game.stallCheck = { key, forcedLoop: false };
-    return false;
-  }
-
-  for (const [from, to] of moves) {
-    const next = applyBoardMove(board, from, to);
-    const nextMoves = legalMovesForBoard(next);
-    if (nextMoves.length === 0) {
-      game.stallCheck = { key, forcedLoop: false };
-      return false;
-    }
-
-    let hasEscape = false;
-    for (const [nextFrom, nextTo] of nextMoves) {
-      const after = applyBoardMove(next, nextFrom, nextTo);
-      if (boardStateKey(after) !== key) {
-        hasEscape = true;
-        break;
-      }
-    }
-
-    if (hasEscape) {
-      game.stallCheck = { key, forcedLoop: false };
-      return false;
-    }
-  }
-
-  game.stallCheck = { key, forcedLoop: true };
-  return true;
-}
-
-function invalidMoveReason(from, to, board) {
-  if (from === to) {
-    return "Pick a different tube.";
-  }
-  const source = board[from];
-  const destination = board[to];
-  if (!source || source.length === 0) {
-    return "That tube is empty.";
-  }
-  if (!destination) {
-    return "That tube is unavailable.";
-  }
-  if (destination.length >= TUBE_CAPACITY) {
-    return "The destination tube is full.";
-  }
-  if (destination.length > 0 && topColor(destination) !== topColor(source)) {
-    return "You can only pour onto the same color or an empty tube.";
-  }
-  return "That move is not allowed.";
 }
 
 // --- UI feedback / micro-interactions ---
@@ -807,7 +685,7 @@ function setScoreLine(text = "") {
   scoreLineEl.classList.toggle("visible", text.length > 0);
 }
 
-function updateStatusText(board) {
+function updateStatusText() {
   if (game.handle === null) {
     statusTextEl.textContent = "Loading engine...";
     setScoreLine();
@@ -845,14 +723,14 @@ function updateStatusText(board) {
     setScoreLine();
   }
 
-  const legalMoves = legalMovesForBoard(board);
-  if (legalMoves.length === 0) {
+  const currentStallStatus = stallStatus(game.handle, FORCED_LOOP_SCAN_MOVE_LIMIT);
+  if (currentStallStatus === STALL_STATUS.NO_LEGAL_MOVES) {
     game.selectedTube = null;
     statusTextEl.textContent = "No legal moves left in this state. Undo or Restart.";
     return;
   }
 
-  if (isForcedMoveLoop(board, legalMoves)) {
+  if (currentStallStatus === STALL_STATUS.FORCED_LOOP) {
     game.selectedTube = null;
     statusTextEl.textContent = "This state is stuck in a move loop. Undo a few moves or Restart.";
     return;
@@ -863,8 +741,7 @@ function updateStatusText(board) {
     return;
   }
 
-  const selected = board[game.selectedTube];
-  if (!selected || selected.length === 0) {
+  if (tubeLen(game.handle, game.selectedTube) === 0) {
     game.selectedTube = null;
     statusTextEl.textContent = "Pick a tube to begin.";
     return;
@@ -958,7 +835,7 @@ function finishLastMoveAnimation() {
 
 function render() {
   const board = readBoardState();
-  updateStatusText(board);
+  updateStatusText();
   renderBoard(board);
   undoBtn.disabled = game.handle === null || moveCount(game.handle) === 0;
   restartBtn.disabled = game.handle === null;
@@ -992,12 +869,11 @@ function handleTubeClick(index) {
   if (game.handle === null || game.won) {
     return;
   }
-  const board = readBoardState();
   const selected = game.selectedTube;
-  const clickedTube = board[index];
+  const clickedTubeLen = tubeLen(game.handle, index);
 
   if (selected === null) {
-    if (!clickedTube || clickedTube.length === 0) {
+    if (clickedTubeLen === 0) {
       showToast("That tube is empty.");
       triggerShake(index);
       return;
@@ -1026,9 +902,10 @@ function handleTubeClick(index) {
     }
   }
 
-  showToast(invalidMoveReason(selected, index, board));
+  const reasonCode = invalidMoveReasonCode(game.handle, selected, index);
+  showToast(invalidMoveReasonMessage(reasonCode));
   triggerShake(index);
-  game.selectedTube = clickedTube && clickedTube.length > 0 ? index : selected;
+  game.selectedTube = clickedTubeLen > 0 ? index : selected;
   render();
 }
 
@@ -1044,19 +921,51 @@ function destroyCurrentGame() {
   resetInteractionState();
 }
 
+function normalizeSeed(seed) {
+  if (typeof seed === "number" && Number.isFinite(seed) && seed > 0) {
+    return Math.trunc(seed);
+  }
+  if (typeof seed === "bigint" && seed > 0n) {
+    return Number(seed);
+  }
+  return randomSeed();
+}
+
+function clearShareParamsFromUrl() {
+  const url = new URL(window.location.href);
+  const shareKeys = ["ws", "t", "b", "e", "sc", "sd", "mv"];
+  let mutated = false;
+  for (const key of shareKeys) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      mutated = true;
+    }
+  }
+  if (!mutated) {
+    return;
+  }
+  const target = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(null, "", target);
+}
+
 function startNewGame(seed = randomSeed(), options = {}) {
-  const sharedReplay = options.sharedReplay || null;
-  const sharedView = options.sharedView === "initial" ? "initial" : "current";
+  const normalizedSeed = normalizeSeed(seed);
+  const sharedReplay = options && options.sharedReplay ? options.sharedReplay : null;
+  const sharedView = options && options.sharedView === "initial" ? "initial" : "current";
+  const keepShareUrl = Boolean(options && options.keepShareUrl);
   if (!game.ready) {
     return;
   }
   destroyCurrentGame();
-  game.seed = seed;
+  if (!sharedReplay && !keepShareUrl) {
+    clearShareParamsFromUrl();
+  }
+  game.seed = normalizedSeed;
   game.activeBottleCount = game.bottleCount;
   game.activeEmptyTubes = game.emptyTubes;
   game.activeScramble = game.scramble;
   game.moveTrail = [];
-  game.handle = createGame(game.bottleCount, game.emptyTubes, game.scramble, seed);
+  game.handle = createGame(game.bottleCount, game.emptyTubes, game.scramble, normalizedSeed);
   resetInteractionState();
   game.sharedReplay = sharedReplay;
   game.sharedView = sharedReplay ? sharedView : "current";
@@ -1154,7 +1063,9 @@ guideOverlayEl.addEventListener("click", (event) => {
   }
 });
 
-newGameBtn.addEventListener("click", startNewGame);
+newGameBtn.addEventListener("click", () => {
+  startNewGame();
+});
 restartBtn.addEventListener("click", restartGame);
 undoBtn.addEventListener("click", undoMove);
 showGuideBtn.addEventListener("click", openGuide);
@@ -1193,6 +1104,7 @@ async function bootstrap() {
       startNewGame(shared.seed, {
         sharedReplay: replay,
         sharedView: shared.type === "current" ? "current" : "initial",
+        keepShareUrl: true,
       });
       if (shared.type === "current") {
         restoreSharedCurrent(shared.moves);

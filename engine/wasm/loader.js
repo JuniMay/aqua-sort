@@ -5,6 +5,20 @@
 let wasm = null;
 
 const DEFAULT_WASM_PATH = "./engine/wasm/water_engine.wasm";
+export const STALL_STATUS = Object.freeze({
+  NONE: 0,
+  NO_LEGAL_MOVES: 1,
+  FORCED_LOOP: 2,
+});
+export const MOVE_REASON = Object.freeze({
+  NONE: 0,
+  SAME_TUBE: 1,
+  SOURCE_EMPTY: 2,
+  DEST_UNAVAILABLE: 3,
+  DEST_FULL: 4,
+  COLOR_MISMATCH: 5,
+  NOT_ALLOWED: 6,
+});
 
 function ensureReady() {
   if (!wasm) {
@@ -61,6 +75,18 @@ export function tubeColor(handle, tubeIndex, level) {
 export function canPour(handle, from, to) {
   ensureReady();
   return (wasm.game_can_pour(handle >>> 0, from >>> 0, to >>> 0) >>> 0) === 1;
+}
+
+// Returns an enum code that explains why a move is invalid.
+export function invalidMoveReasonCode(handle, from, to) {
+  ensureReady();
+  return wasm.game_invalid_move_reason(handle >>> 0, from >>> 0, to >>> 0) >>> 0;
+}
+
+// Returns dead-end / forced-loop status for the current board.
+export function stallStatus(handle, moveLimit) {
+  ensureReady();
+  return wasm.game_stall_status(handle >>> 0, moveLimit >>> 0) >>> 0;
 }
 
 export function pour(handle, from, to) {

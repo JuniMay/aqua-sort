@@ -23,6 +23,26 @@ const MAX_TOTAL_TUBES: usize = 24;
 const MIN_EMPTY_TUBES: usize = 2;
 /// Upper bound for empty helper tubes accepted by the engine.
 const MAX_EMPTY_TUBES: usize = 4;
+/// Bitflag: no dead-end and no detected forced loop.
+const STALL_STATUS_NONE: u32 = 0;
+/// Bitflag: no legal moves are available from the current state.
+const STALL_STATUS_NO_LEGAL_MOVES: u32 = 1;
+/// Bitflag: legal moves only bounce in a two-ply loop back to the same state.
+const STALL_STATUS_FORCED_LOOP: u32 = 2;
+/// Invalid move code: the move is legal (no error).
+const MOVE_REASON_NONE: u32 = 0;
+/// Invalid move code: source and destination are the same tube.
+const MOVE_REASON_SAME_TUBE: u32 = 1;
+/// Invalid move code: source tube is empty or invalid.
+const MOVE_REASON_SOURCE_EMPTY: u32 = 2;
+/// Invalid move code: destination tube index is invalid.
+const MOVE_REASON_DEST_UNAVAILABLE: u32 = 3;
+/// Invalid move code: destination tube is full.
+const MOVE_REASON_DEST_FULL: u32 = 4;
+/// Invalid move code: destination top color does not match source top color.
+const MOVE_REASON_COLOR_MISMATCH: u32 = 5;
+/// Invalid move code: generic disallowed move fallback.
+const MOVE_REASON_NOT_ALLOWED: u32 = 6;
 
 /// Canonical puzzle representation used internally by the solver and generator.
 type State = Vec<Vec<u8>>;
@@ -144,18 +164,7 @@ impl Game {
 
     /// Checks whether a pour move is legal for `(from, to)`.
     fn can_pour(&self, from: usize, to: usize) -> bool {
-        if from == to || from >= self.state.len() || to >= self.state.len() {
-            return false;
-        }
-        let source = &self.state[from];
-        let dest = &self.state[to];
-        if source.is_empty() || dest.len() >= TUBE_CAPACITY {
-            return false;
-        }
-        if dest.is_empty() {
-            return true;
-        }
-        source.last() == dest.last()
+        can_pour_state(&self.state, from, to)
     }
 
     /// Applies one legal pour and records the previous state for undo.
@@ -244,6 +253,22 @@ fn top_run_count(tube: &[u8]) -> usize {
     run
 }
 
+/// Returns whether pouring from `from` into `to` is legal for an arbitrary state.
+fn can_pour_state(state: &State, from: usize, to: usize) -> bool {
+    if from == to || from >= state.len() || to >= state.len() {
+        return false;
+    }
+    let source = &state[from];
+    let destination = &state[to];
+    if source.is_empty() || destination.len() >= TUBE_CAPACITY {
+        return false;
+    }
+    if destination.is_empty() {
+        return true;
+    }
+    source.last() == destination.last()
+}
+
 /// Applies a forward puzzle pour from one tube into another.
 fn apply_pour(state: &mut State, from: usize, to: usize) -> usize {
     let amount = {
@@ -258,6 +283,95 @@ fn apply_pour(state: &mut State, from: usize, to: usize) -> usize {
     let moved = state[from].split_off(split_at);
     state[to].extend_from_slice(&moved);
     amount
+}
+
+/// Applies one move to a cloned state when legal, otherwise returns an unchanged clone.
+fn apply_move_clone(state: &State, from: usize, to: usize) -> State {
+    let mut next = state.clone();
+    if !can_pour_state(&next, from, to) {
+        return next;
+    }
+    apply_pour(&mut next, from, to);
+    next
+}
+
+/// Enumerates legal player moves without solver-specific symmetry pruning.
+fn enumerate_legal_moves(state: &State) -> Vec<(usize, usize)> {
+    let mut moves = Vec::new();
+    for from in 0..state.len() {
+        for to in 0..state.len() {
+            if can_pour_state(state, from, to) {
+                moves.push((from, to));
+            }
+        }
+    }
+    moves
+}
+
+/// Returns a machine-readable invalid move reason code for UI messaging.
+fn invalid_move_reason_code(state: &State, from: usize, to: usize) -> u32 {
+    if from == to {
+        return MOVE_REASON_SAME_TUBE;
+    }
+    let Some(source) = state.get(from) else {
+        return MOVE_REASON_SOURCE_EMPTY;
+    };
+    if source.is_empty() {
+        return MOVE_REASON_SOURCE_EMPTY;
+    }
+    let Some(destination) = state.get(to) else {
+        return MOVE_REASON_DEST_UNAVAILABLE;
+    };
+    if destination.len() >= TUBE_CAPACITY {
+        return MOVE_REASON_DEST_FULL;
+    }
+    if !destination.is_empty() && source.last() != destination.last() {
+        return MOVE_REASON_COLOR_MISMATCH;
+    }
+    if can_pour_state(state, from, to) {
+        return MOVE_REASON_NONE;
+    }
+    MOVE_REASON_NOT_ALLOWED
+}
+
+/// Checks whether every legal move is trapped in an immediate two-ply bounce.
+fn is_forced_move_loop_with_moves(state: &State, moves: &[(usize, usize)]) -> bool {
+    for &(from, to) in moves {
+        let next = apply_move_clone(state, from, to);
+        let next_moves = enumerate_legal_moves(&next);
+        if next_moves.is_empty() {
+            return false;
+        }
+
+        let mut has_escape = false;
+        for (next_from, next_to) in next_moves {
+            let after = apply_move_clone(&next, next_from, next_to);
+            if after != *state {
+                has_escape = true;
+                break;
+            }
+        }
+
+        if has_escape {
+            return false;
+        }
+    }
+    true
+}
+
+/// Classifies whether the current state is dead-ended or trapped in a move loop.
+fn stall_status_for_state(state: &State, move_limit: usize) -> u32 {
+    let legal_moves = enumerate_legal_moves(state);
+    if legal_moves.is_empty() {
+        return STALL_STATUS_NO_LEGAL_MOVES;
+    }
+    if move_limit == 0 || legal_moves.len() > move_limit {
+        return STALL_STATUS_NONE;
+    }
+    if is_forced_move_loop_with_moves(state, &legal_moves) {
+        return STALL_STATUS_FORCED_LOOP;
+    }
+    STALL_STATUS_NONE
 }
 
 /// Hashes a state for fast "seen state" checks during generation.
@@ -845,6 +959,36 @@ pub extern "C" fn game_can_pour(handle: u32, from: u32, to: u32) -> u32 {
     )
 }
 
+/// Returns an invalid move reason code for `(from, to)`:
+/// - `0`: legal move
+/// - `1`: same tube
+/// - `2`: source empty/unavailable
+/// - `3`: destination unavailable
+/// - `4`: destination full
+/// - `5`: color mismatch
+/// - `6`: generic disallowed move
+#[no_mangle]
+pub extern "C" fn game_invalid_move_reason(handle: u32, from: u32, to: u32) -> u32 {
+    with_game(
+        handle,
+        |g| invalid_move_reason_code(&g.state, from as usize, to as usize),
+        MOVE_REASON_NOT_ALLOWED,
+    )
+}
+
+/// Returns stall status for current state:
+/// - `0`: normal
+/// - `1`: no legal moves
+/// - `2`: forced two-ply loop detected
+#[no_mangle]
+pub extern "C" fn game_stall_status(handle: u32, move_limit: u32) -> u32 {
+    with_game(
+        handle,
+        |g| stall_status_for_state(&g.state, move_limit as usize),
+        STALL_STATUS_NONE,
+    )
+}
+
 /// Applies one pour and returns how many cells were moved.
 #[no_mangle]
 pub extern "C" fn game_pour(handle: u32, from: u32, to: u32) -> u32 {
@@ -939,5 +1083,52 @@ mod tests {
         if game.ideal_is_exact {
             assert!(ideal > 0 || game.is_solved());
         }
+    }
+
+    #[test]
+    fn invalid_move_reason_codes_cover_common_cases() {
+        let state: State = vec![vec![0], vec![1, 1, 1, 1], vec![], vec![0]];
+        assert_eq!(
+            invalid_move_reason_code(&state, 0, 0),
+            MOVE_REASON_SAME_TUBE
+        );
+        assert_eq!(
+            invalid_move_reason_code(&state, 2, 0),
+            MOVE_REASON_SOURCE_EMPTY
+        );
+        assert_eq!(
+            invalid_move_reason_code(&state, 9, 0),
+            MOVE_REASON_SOURCE_EMPTY
+        );
+        assert_eq!(
+            invalid_move_reason_code(&state, 0, 9),
+            MOVE_REASON_DEST_UNAVAILABLE
+        );
+        assert_eq!(
+            invalid_move_reason_code(&state, 0, 1),
+            MOVE_REASON_DEST_FULL
+        );
+        assert_eq!(invalid_move_reason_code(&state, 0, 2), MOVE_REASON_NONE);
+    }
+
+    #[test]
+    fn stall_status_detects_dead_end_and_forced_loop() {
+        let dead_end: State = vec![
+            vec![0, 1, 0, 1],
+            vec![1, 0, 1, 0],
+            vec![2, 3, 2, 3],
+            vec![3, 2, 3, 2],
+        ];
+        assert_eq!(
+            stall_status_for_state(&dead_end, 20),
+            STALL_STATUS_NO_LEGAL_MOVES
+        );
+
+        let forced_loop: State = vec![vec![0], vec![]];
+        assert_eq!(
+            stall_status_for_state(&forced_loop, 20),
+            STALL_STATUS_FORCED_LOOP
+        );
+        assert_eq!(stall_status_for_state(&forced_loop, 0), STALL_STATUS_NONE);
     }
 }

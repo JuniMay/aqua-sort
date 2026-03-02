@@ -10,6 +10,7 @@
 # Rust build output
 target/
 **/target/
+engine/wasm/water_engine.wasm
 
 # Local packaging / build artifacts
 site/
